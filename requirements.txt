@@ -1,0 +1,15 @@
+# Golf Ball Tracking System - Python Dependencies
+
+# Core Dependencies
+numpy>=1.21.0
+opencv-python>=4.5.0
+ultralytics>=8.0.0
+
+# Optional: For better performance
+# opencv-contrib-python>=4.5.0
+
+# Optional: For GPU acceleration (CUDA required)
+# torch>=2.0.0
+
+# Optional: For data export
+# pandas>=1.3.0
