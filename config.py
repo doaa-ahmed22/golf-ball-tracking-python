@@ -15,7 +15,7 @@ class Config:
     # ═══════════════════════════════════════════════════════════
     
     MODEL_PATH = "golfballyolov8n.pt"              # YOLOv8 model weights path
-    VIDEO_INPUT = "input.mp4"         # Input video path
+    VIDEO_INPUT = "input_6.mp4"         # Input video path
     VIDEO_OUTPUT = "output.mp4"  # Output video path
     
     # ═══════════════════════════════════════════════════════════
@@ -26,7 +26,7 @@ class Config:
     # Lower = more detections but more false positives
     # Higher = fewer detections but more reliable
     # Recommended: 0.3 - 0.4
-    CONFIDENCE_THRESHOLD = 0.35
+    CONFIDENCE_THRESHOLD = 0.1
     
     # ═══════════════════════════════════════════════════════════
     # TRACKING PARAMETERS (Kalman Filter)
@@ -58,17 +58,17 @@ class Config:
     # Larger = more detections but slower processing
     # Smaller = faster but may miss ball
     # Recommended: 150 - 250
-    INITIAL_ROI_SIZE = 200
+    INITIAL_ROI_SIZE = 400
     
     # Minimum ROI size in pixels
     # Prevents ROI from becoming too small
     # Recommended: 80 - 150
-    MIN_ROI_SIZE = 100
+    MIN_ROI_SIZE = 400
     
     # Maximum ROI size in pixels
     # Prevents ROI from becoming too large
     # Recommended: 300 - 500
-    MAX_ROI_SIZE = 400
+    MAX_ROI_SIZE = 600
     
     # ROI expansion factor when detection fails
     # Higher = faster expansion (more aggressive search)
@@ -98,7 +98,7 @@ class Config:
     # Detections smaller than this are rejected
     # Prevents tracking tiny false positives
     # Recommended: 30 - 100
-    MIN_BBOX_AREA = 50
+    MIN_BBOX_AREA = 9
     
     # Aspect ratio range for valid detections (width/height)
     # Golf balls should be roughly circular

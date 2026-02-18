@@ -163,7 +163,7 @@ def draw_info_panel(
                     (x_start + 250, y_start + line_height * 4),
                     font, font_scale, color, thickness)
 
-    combined = np.vstack([panel, frame])
+    combined = np.vstack([frame, panel])
     return combined
 
 
@@ -301,15 +301,17 @@ def main():
             vx, vy = tracker.get_velocity()
 
             # Step 3: Create dynamic ROI around prediction
-            if tracker.get_speed() > 10:
-                roi = roi_manager.get_adaptive_roi((pred_x, pred_y), (vx, vy))
-            else:
-                roi = roi_manager.get_roi((pred_x, pred_y))
+            roi = roi_manager.get_adaptive_roi((pred_x, pred_y), (vx, vy))
 
-            # Step 4: Run detection in ROI
+            # Step 4: Always run BOTH roi and full-frame detection every frame.
+            # The ball can jump far from the predicted ROI (e.g. after a swing),
+            # and we can't rely on speed to know when that happens — speed is
+            # unreliable when there are few detections. Full-frame is the safety net.
             detection = detector.detect_in_roi(frame, roi)
+            fullframe_detection = detector.detect_full_frame(frame)
 
-            # Step 5: Process detection result
+            # Step 5: Process detection result — prefer ROI (more precise),
+            # fall back to full-frame immediately if ROI misses or is rejected.
             if detection is not None:
                 cx, cy, conf, bbox = detection
 
@@ -318,14 +320,13 @@ def main():
                     predicted_pos=(pred_x, pred_y),
                     last_bbox=tracker.last_bbox,
                     max_distance=Config.MAX_DISTANCE,
-                    max_size_change_ratio=Config.MAX_SIZE_CHANGE_RATIO
+                    max_size_change_ratio=Config.MAX_SIZE_CHANGE_RATIO,
+                    min_bbox_area=Config.MIN_BBOX_AREA
                 )
 
                 if is_valid:
                     tracker.update((cx, cy), bbox)
                     roi_manager.shrink_roi()
-
-                    # Record this confirmed detection for trajectory
                     all_detections.append((cx, cy))
 
                     x1, y1, x2, y2 = bbox
@@ -334,24 +335,9 @@ def main():
                     cv2.putText(frame, f"{conf:.2f}", (x1, y1 - 5),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
                 else:
-                    tracker.update_with_prediction()
-                    roi_manager.expand_roi()
-
-                    x1, y1, x2, y2 = bbox
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 1)
-                    cv2.putText(frame, "REJECTED", (x1, y1 - 5),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-            else:
-                # ─── No detection in ROI ───
-                # If we've missed enough frames, try a full-frame fallback
-                # to re-acquire the ball even if it moved far away.
-                if tracker.missed_frames >= FALLBACK_AFTER_MISSED:
-                    fallback_detection = detector.detect_full_frame(frame)
-
-                    if fallback_detection is not None:
-                        fcx, fcy, fconf, fbbox = fallback_detection
-
-                        # Re-initialize tracker at the newly found position
+                    # ROI result rejected — use full-frame immediately
+                    if fullframe_detection is not None:
+                        fcx, fcy, fconf, fbbox = fullframe_detection
                         tracker = KalmanBallTracker(
                             initial_position=(fcx, fcy),
                             process_noise=Config.PROCESS_NOISE,
@@ -361,15 +347,10 @@ def main():
                         tracker.last_bbox = fbbox
                         roi_manager.reset_roi()
                         fallback_reacquisitions += 1
-
-                        # Record this re-acquired point — this is the key!
-                        # The trajectory line will now bridge from the last
-                        # known point to this newly found distant point.
                         all_detections.append((fcx, fcy))
 
-                        print(f"  ↻ Frame {frame_idx}: Fallback re-acquired at "
-                              f"({fcx}, {fcy}) conf={fconf:.2f} "
-                              f"[gap bridged from {all_detections[-2] if len(all_detections) >= 2 else 'start'}]")
+                        print(f"  ↻ Frame {frame_idx}: ROI rejected → full-frame at "
+                              f"({fcx}, {fcy}) conf={fconf:.2f}")
 
                         fx1, fy1, fx2, fy2 = fbbox
                         cv2.rectangle(frame, (fx1, fy1), (fx2, fy2), (255, 165, 0), 2)
@@ -379,6 +360,37 @@ def main():
                     else:
                         tracker.update_with_prediction()
                         roi_manager.expand_roi()
+
+                        x1, y1, x2, y2 = bbox
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 1)
+                        cv2.putText(frame, "REJECTED", (x1, y1 - 5),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
+            else:
+                # ─── ROI found nothing ───
+                # Full-frame already ran — use it immediately if it found something.
+                if fullframe_detection is not None:
+                    fcx, fcy, fconf, fbbox = fullframe_detection
+
+                    tracker = KalmanBallTracker(
+                        initial_position=(fcx, fcy),
+                        process_noise=Config.PROCESS_NOISE,
+                        measurement_noise=Config.MEASUREMENT_NOISE,
+                        max_missed_frames=Config.MAX_MISSED_FRAMES
+                    )
+                    tracker.last_bbox = fbbox
+                    roi_manager.reset_roi()
+                    fallback_reacquisitions += 1
+                    all_detections.append((fcx, fcy))
+
+                    print(f"  ↻ Frame {frame_idx}: ROI empty → full-frame at "
+                          f"({fcx}, {fcy}) conf={fconf:.2f} "
+                          f"[gap bridged from {all_detections[-2] if len(all_detections) >= 2 else 'start'}]")
+
+                    fx1, fy1, fx2, fy2 = fbbox
+                    cv2.rectangle(frame, (fx1, fy1), (fx2, fy2), (255, 165, 0), 2)
+                    cv2.circle(frame, (fcx, fcy), 8, (255, 165, 0), -1)
+                    cv2.putText(frame, f"FALLBACK: {fconf:.2f}", (fx1, fy1 - 10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 165, 0), 2)
                 else:
                     tracker.update_with_prediction()
                     roi_manager.expand_roi()
