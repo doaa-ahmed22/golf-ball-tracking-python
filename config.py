@@ -168,7 +168,7 @@ class Config:
     SHOW_VELOCITY = False
     
     # Trajectory line thickness (pixels)
-    TRAJECTORY_THICKNESS = 2
+    TRAJECTORY_THICKNESS = 10
     
     # Trajectory color (BGR format)
     TRAJECTORY_COLOR = (0, 255, 0)  # Green

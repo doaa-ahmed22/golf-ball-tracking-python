@@ -17,6 +17,7 @@ import sys
 from detector import BallDetector
 from tracker import KalmanBallTracker, TrackingState
 from roi_manager import ROIManager
+from trajectory_predictor import TrajectoryPredictor
 
 # Import configuration
 try:
@@ -53,6 +54,22 @@ except ImportError:
 # TRAJECTORY DRAWING
 # ═══════════════════════════════════════════════════════════
 
+def _add_detection(
+    detections: List[Tuple[int, int]], point: Tuple[int, int]
+) -> bool:
+    """
+    Append point only if it is far enough from the last recorded detection.
+    Returns True if the point was added, False if it was skipped as a duplicate.
+    """
+    if detections:
+        lx, ly = detections[-1]
+        dist = ((point[0] - lx) ** 2 + (point[1] - ly) ** 2) ** 0.5
+        if dist < Config.MIN_DETECTION_DISTANCE:
+            return False
+    detections.append(point)
+    return True
+
+
 def draw_trajectory(frame: np.ndarray, all_detections: List[Tuple[int, int]]):
     """
     Draw the full trajectory line connecting all detected ball positions.
@@ -67,38 +84,11 @@ def draw_trajectory(frame: np.ndarray, all_detections: List[Tuple[int, int]]):
         return
 
     # Draw lines between consecutive detection points
-    for i in range(1, len(all_detections)):
+    # Start from index 2 so the first segment doesn't overlay the DETECTED box
+    for i in range(2, len(all_detections)):
         pt1 = all_detections[i - 1]
         pt2 = all_detections[i]
-
-        # Fade color from yellow (start) to green (recent)
-        alpha = i / len(all_detections)
-        color = (
-            int(0 * alpha),           # B: 0
-            int(255 * alpha),          # G: fades in
-            int(255 * (1 - alpha))     # R: fades out
-        )
-        cv2.line(frame, pt1, pt2, color, Config.TRAJECTORY_THICKNESS + 1, cv2.LINE_AA)
-
-    # Draw dots at each detection point
-    for i, pt in enumerate(all_detections):
-        alpha = i / max(len(all_detections) - 1, 1)
-        dot_color = (
-            int(0 * alpha),
-            int(200 * alpha + 55),
-            int(255 * (1 - alpha))
-        )
-        cv2.circle(frame, pt, 4, dot_color, -1)
-
-    # Mark start and end
-    cv2.circle(frame, all_detections[0], 8, (0, 255, 255), 2)   # Cyan = start
-    cv2.putText(frame, "START", (all_detections[0][0] + 10, all_detections[0][1]),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
-
-    if len(all_detections) > 1:
-        cv2.circle(frame, all_detections[-1], 8, (0, 165, 255), 2)  # Orange = latest
-        cv2.putText(frame, "LATEST", (all_detections[-1][0] + 10, all_detections[-1][1]),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 165, 255), 1)
+        cv2.line(frame, pt1, pt2, Config.TRAJECTORY_COLOR, Config.TRAJECTORY_THICKNESS, cv2.LINE_AA)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -210,13 +200,22 @@ def main():
         Config.ROI_EXPANSION_FACTOR
     )
 
+    # ─── Trajectory Predictor ───
+    trajectory_predictor = TrajectoryPredictor(
+        frame_width=width,
+        frame_height=height,
+        min_consistent_segments=Config.PREDICTION_MIN_CONSISTENT_SEGMENTS,
+        direction_tolerance_deg=Config.PREDICTION_DIRECTION_TOLERANCE_DEG,
+        lookback_points=Config.PREDICTION_LOOKBACK_POINTS,
+        max_prediction_length_px=Config.PREDICTION_MAX_LENGTH_PX,
+    )
+
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    panel_height = 120
     out = cv2.VideoWriter(
         Config.VIDEO_OUTPUT,
         fourcc,
         fps,
-        (width, height + panel_height)
+        (width, height)
     )
 
     # ─── Tracking State Variables ───
@@ -231,8 +230,15 @@ def main():
     # so we can draw a line connecting them even across large gaps.
     all_detections: List[Tuple[int, int]] = []
 
+    # Bounding box of the very first detection (drawn every frame)
+    first_detection_bbox: Optional[Tuple[int, int, int, int]] = None
+
     # Count how many times we re-acquired via full-frame fallback
     fallback_reacquisitions = 0
+
+    # Prediction animation state
+    prediction_reveal_count = 0   # how many predicted points revealed so far
+    last_prediction_key = None    # detect when prediction changes (reset animation)
 
     # How many consecutive missed frames before we try full-frame fallback
     # (separate from MAX_MISSED_FRAMES which resets the tracker entirely)
@@ -278,16 +284,16 @@ def main():
                 roi_manager.reset_roi()
 
                 # Record this detection for trajectory drawing
-                all_detections.append((cx, cy))
+                _add_detection(all_detections, (cx, cy))
+
+                # Store the first detection bbox
+                if first_detection_bbox is None:
+                    first_detection_bbox = bbox
 
                 print(f"✓ Frame {frame_idx}: Ball detected at ({cx}, {cy}) "
                       f"confidence={conf:.2f} → Tracking started")
 
                 x1, y1, x2, y2 = bbox
-                cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                cv2.circle(frame, (cx, cy), 6, (0, 255, 0), -1)
-                cv2.putText(frame, f"DETECTED: {conf:.2f}", (x1, y1 - 10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
         # ═══════════════════════════════════════════════════════
         # PHASE 2: TRACKING (Kalman Filter + ROI)
@@ -327,13 +333,9 @@ def main():
                 if is_valid:
                     tracker.update((cx, cy), bbox)
                     roi_manager.shrink_roi()
-                    all_detections.append((cx, cy))
+                    _add_detection(all_detections, (cx, cy))
 
                     x1, y1, x2, y2 = bbox
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                    cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)
-                    cv2.putText(frame, f"{conf:.2f}", (x1, y1 - 5),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
                 else:
                     # ROI result rejected — use full-frame immediately
                     if fullframe_detection is not None:
@@ -347,24 +349,17 @@ def main():
                         tracker.last_bbox = fbbox
                         roi_manager.reset_roi()
                         fallback_reacquisitions += 1
-                        all_detections.append((fcx, fcy))
+                        _add_detection(all_detections, (fcx, fcy))
 
                         print(f"  ↻ Frame {frame_idx}: ROI rejected → full-frame at "
                               f"({fcx}, {fcy}) conf={fconf:.2f}")
 
                         fx1, fy1, fx2, fy2 = fbbox
-                        cv2.rectangle(frame, (fx1, fy1), (fx2, fy2), (255, 165, 0), 2)
-                        cv2.circle(frame, (fcx, fcy), 8, (255, 165, 0), -1)
-                        cv2.putText(frame, f"FALLBACK: {fconf:.2f}", (fx1, fy1 - 10),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 165, 0), 2)
                     else:
                         tracker.update_with_prediction()
                         roi_manager.expand_roi()
 
                         x1, y1, x2, y2 = bbox
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 1)
-                        cv2.putText(frame, "REJECTED", (x1, y1 - 5),
-                                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
             else:
                 # ─── ROI found nothing ───
                 # Full-frame already ran — use it immediately if it found something.
@@ -380,27 +375,20 @@ def main():
                     tracker.last_bbox = fbbox
                     roi_manager.reset_roi()
                     fallback_reacquisitions += 1
-                    all_detections.append((fcx, fcy))
+                    _add_detection(all_detections, (fcx, fcy))
 
                     print(f"  ↻ Frame {frame_idx}: ROI empty → full-frame at "
                           f"({fcx}, {fcy}) conf={fconf:.2f} "
                           f"[gap bridged from {all_detections[-2] if len(all_detections) >= 2 else 'start'}]")
 
                     fx1, fy1, fx2, fy2 = fbbox
-                    cv2.rectangle(frame, (fx1, fy1), (fx2, fy2), (255, 165, 0), 2)
-                    cv2.circle(frame, (fcx, fcy), 8, (255, 165, 0), -1)
-                    cv2.putText(frame, f"FALLBACK: {fconf:.2f}", (fx1, fy1 - 10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 165, 0), 2)
                 else:
                     tracker.update_with_prediction()
                     roi_manager.expand_roi()
 
             # Draw predicted position
             if Config.SHOW_PREDICTION:
-                cv2.circle(frame, (int(pred_x), int(pred_y)), 8,
-                          Config.PRED_COLOR, 2)
-                cv2.putText(frame, "PRED", (int(pred_x) + 10, int(pred_y)),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.4, Config.PRED_COLOR, 1)
+                pass  # marker hidden
 
             # Draw ROI
             if Config.SHOW_ROI:
@@ -420,6 +408,53 @@ def main():
         # ═══════════════════════════════════════════════════════
         draw_trajectory(frame, all_detections)
 
+        # Draw bounding box and label on the first detected point
+        if first_detection_bbox is not None:
+            fx1, fy1, fx2, fy2 = first_detection_bbox
+            cv2.rectangle(frame, (fx1, fy1), (fx2, fy2), (0, 255, 0), 2)
+            cv2.putText(frame, "DETECTED", (fx1, fy1 - 8),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+
+        # ═══════════════════════════════════════════════════════
+        # PREDICTION: extend trajectory in consistent direction
+        # ═══════════════════════════════════════════════════════
+        if Config.PREDICTION_ENABLED and len(all_detections) >= 3:
+            predicted_pts = trajectory_predictor.predict(all_detections)
+            if predicted_pts:
+                # Animation: reveal points gradually over frames
+                # Use the last real point + total predicted count as a key
+                # to detect when the prediction has changed (new detections arrived)
+                current_key = (all_detections[-1], len(predicted_pts))
+                if current_key != last_prediction_key:
+                    # Prediction changed — reset the reveal counter
+                    prediction_reveal_count = 0
+                    last_prediction_key = current_key
+
+                # Advance the reveal
+                pts_per_frame = Config.PREDICTION_POINTS_PER_FRAME
+                if pts_per_frame > 0:
+                    prediction_reveal_count = min(
+                        prediction_reveal_count + pts_per_frame,
+                        len(predicted_pts),
+                    )
+                    visible_pts = predicted_pts[:prediction_reveal_count]
+                else:
+                    # No animation — show everything at once
+                    visible_pts = predicted_pts
+
+                if visible_pts:
+                    trajectory_predictor.draw_predicted(
+                        frame,
+                        visible_pts,
+                        last_real_point=all_detections[-1],
+                        color=Config.PREDICTION_LINE_COLOR,
+                        thickness=Config.PREDICTION_LINE_THICKNESS,
+                    )
+            else:
+                # No valid prediction — reset animation state
+                prediction_reveal_count = 0
+                last_prediction_key = None
+
         # ═══════════════════════════════════════════════════════
         # VISUALIZATION & OUTPUT
         # ═══════════════════════════════════════════════════════
@@ -428,13 +463,7 @@ def main():
         process_times.append(frame_time)
         current_fps = 1.0 / frame_time if frame_time > 0 else 0
 
-        frame_with_info = draw_info_panel(
-            frame, frame_idx, state, tracker,
-            roi_manager.get_current_size(), current_fps,
-            len(all_detections), fallback_reacquisitions
-        )
-
-        out.write(frame_with_info)
+        out.write(frame)
 
         if frame_idx % 30 == 0:
             progress = (frame_idx / total_frames) * 100
