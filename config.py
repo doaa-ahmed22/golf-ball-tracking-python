@@ -107,6 +107,53 @@ class Config:
     MIN_ASPECT_RATIO = 0.3
     MAX_ASPECT_RATIO = 3.0
     
+    # Minimum distance (pixels) between consecutive recorded detections
+    # Points closer than this are considered the same position and skipped
+    # Prevents duplicate points when the ball is stationary
+    # Recommended: 5 - 20
+    MIN_DETECTION_DISTANCE = 10.0
+
+    # ═══════════════════════════════════════════════════════════
+    # PREDICTION PARAMETERS (Trajectory Extension)
+    # ═══════════════════════════════════════════════════════════
+    
+    # Enable trajectory prediction / extension
+    PREDICTION_ENABLED = True
+    
+    # Minimum consecutive segments with same direction to trigger prediction
+    # At least 2 are needed to establish a direction
+    # Recommended: 2 - 4
+    PREDICTION_MIN_CONSISTENT_SEGMENTS = 2
+    
+    # Maximum angular difference (degrees) between two consecutive
+    # segments to consider them "same direction"
+    # Higher = more tolerant to slight curves
+    # Lower = stricter straight-line requirement
+    # Recommended: 20 - 45
+    PREDICTION_DIRECTION_TOLERANCE_DEG = 30.0
+    
+    # How many of the most recent trajectory points to consider
+    # when determining the direction for prediction
+    # Recommended: 3 - 10
+    PREDICTION_LOOKBACK_POINTS = 5
+    
+    # Maximum prediction extension distance in pixels
+    # The predicted line will stop after this distance from the last real point
+    # Recommended: 100 - 500
+    PREDICTION_MAX_LENGTH_PX = 500.0
+    
+    # Prediction line color (BGR)
+    PREDICTION_LINE_COLOR = (0, 255, 0)  # green 
+    
+    # Prediction line thickness
+    PREDICTION_LINE_THICKNESS = 10
+    
+    # How many predicted points to reveal per frame (animation speed)
+    # Higher = faster reveal, Lower = slower / smoother animation
+    # Set to 0 or negative to reveal all at once (no animation)
+    # Recommended: 1 - 5
+    PREDICTION_POINTS_PER_FRAME = 1
+    
     # ═══════════════════════════════════════════════════════════
     # VISUALIZATION PARAMETERS
     # ═══════════════════════════════════════════════════════════
