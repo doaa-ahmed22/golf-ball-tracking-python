@@ -15,7 +15,7 @@ class Config:
     # ═══════════════════════════════════════════════════════════
     
     MODEL_PATH = "golfballyolov8n.pt"              # YOLOv8 model weights path
-    VIDEO_INPUT = "input_6.mp4"         # Input video path
+    VIDEO_INPUT = "indoor_4.mp4"         # Input video path
     VIDEO_OUTPUT = "output.mp4"  # Output video path
     
     # ═══════════════════════════════════════════════════════════
@@ -100,7 +100,7 @@ class Config:
     # Recommended: 30 - 100
     MIN_BBOX_AREA = 9
     
-    # Aspect ratio range for valid detections (width/height)
+    # Aspect ratio range for valid detections3 (width/height)
     # Golf balls should be roughly circular
     # [min, max] range
     # Recommended: [0.3, 3.0]
@@ -140,7 +140,7 @@ class Config:
     # Maximum prediction extension distance in pixels
     # The predicted line will stop after this distance from the last real point
     # Recommended: 100 - 500
-    PREDICTION_MAX_LENGTH_PX = 500.0
+    PREDICTION_MAX_LENGTH_PX = 300.0
     
     # Prediction line color (BGR)
     PREDICTION_LINE_COLOR = (0, 255, 0)  # green 

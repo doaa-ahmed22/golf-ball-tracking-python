@@ -85,7 +85,7 @@ def draw_trajectory(frame: np.ndarray, all_detections: List[Tuple[int, int]]):
 
     # Draw lines between consecutive detection points
     # Start from index 2 so the first segment doesn't overlay the DETECTED box
-    for i in range(2, len(all_detections)):
+    for i in range(1, len(all_detections)):
         pt1 = all_detections[i - 1]
         pt2 = all_detections[i]
         cv2.line(frame, pt1, pt2, Config.TRAJECTORY_COLOR, Config.TRAJECTORY_THICKNESS, cv2.LINE_AA)
